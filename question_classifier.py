@@ -5,6 +5,7 @@ import os
 import ahocorasick
 
 from src.redis_helper import RedisHelper
+from src.tireTree import Trie
 import copy
 
 
@@ -35,8 +36,12 @@ class QuestionClassifier:
         self.region_words = set(
             self.department_wds + self.disease_wds + self.check_wds + self.drug_wds + self.food_wds + self.producer_wds + self.symptom_wds)
         self.deny_words = [i.strip() for i in open(self.deny_path) if i.strip()]
-        # 构造领域actree
-        self.region_tree = self.build_actree(list(self.region_words))
+        # 构建字典树
+        self.region_tree = Trie()
+        for word in list(self.region_words):
+            self.region_tree.add(word)
+        # self.region_tree = self.build_actree(list(self.region_words))
+
         # 构建词典  词：类型
         self.wdtype_dict = self.build_wdtype_dict()
         # 问句疑问词
@@ -64,31 +69,7 @@ class QuestionClassifier:
 
         return
 
-    def classify(self, question, user_id):
-        """
-        分类主函数
-        传入用户问题、redis类、用户id
-        逻辑为先判断询问实体，然后判断问答类型
-        """
-        ls_state = self.redis.key_get(self.prefix + user_id)
-        cur_state = copy.deepcopy(ls_state)
-
-        # --1-- 提取实体信息
-        # 若提取到了实体则用当前实体，并覆盖掉之前的实体，若没有从redis中拉取上一轮的实体信息
-        medical_dict = self.check_medical(question)
-        if not medical_dict:
-            if not ls_state['args']:  # 实体缺失
-                # TODO 实体缺失发起询问
-                pass
-            else:
-                medical_dict = ls_state['args']
-        else:  # 提取到了实体，更新当前状态
-            cur_state['args'] = medical_dict
-
-        # 收集问句当中所涉及到的实体类型
-        types = [type_[0] for type_ in medical_dict.values()]
-
-        # --2-- 基于特征词判断问答类型，支持18种问答
+    def judge_qes(self, question, types, ls_state):
         # TODO 问答类型这一部分可以用flashtext加快查找速度
         question_types = []
         question_type = 'others'
@@ -163,7 +144,7 @@ class QuestionClassifier:
             question_type = 'disease_easyget'
             question_types.append(question_type)
 
-        # 没有查询到问句信息
+        # 没有查询到问句信息，从上一轮中拉取
         if not question_types:
             question_types = ls_state['question_types']
         # 若没有查到相关的外部查询信息，那么则将该疾病的描述信息返回
@@ -173,15 +154,43 @@ class QuestionClassifier:
         if question_types == [] and 'symptom' in types:
             question_types = ['symptom_disease']
 
-        # 将多个分类结果进行合并处理，组装成一个字典
-        cur_state['question_types'] = question_types
+        return question_types
+
+    def classify(self, question, user_id):
+        """
+        分类主函数
+        传入用户问题、redis类、用户id
+        逻辑为先判断询问实体，然后判断问答类型
+        """
+        ls_state = self.redis.key_get(self.prefix + user_id)
+        cur_state = copy.deepcopy(ls_state)
+
+        # --1-- 提取实体信息
+        # 若提取到了实体则用当前实体，并覆盖掉之前的实体，若没有从redis中拉取上一轮的实体信息
+        # medical_dict = self.check_medical(question)
+        medical_dict = self.check_entity(question)
+        print(medical_dict)
+        if not medical_dict:
+            if not ls_state['args']:  # 实体缺失
+                # TODO 实体缺失发起询问
+                pass
+            else:
+                medical_dict = ls_state['args']
+        else:  # 提取到了实体，更新当前状态
+            cur_state['args'] = medical_dict
+
+        # 收集问句当中所涉及到的实体类型
+        types = [type_[0] for type_ in medical_dict.values()]
+
+        # --2-- 基于特征词判断问答类型，支持18种问答
+        cur_state['question_types'] = self.judge_qes(question, types, ls_state)
 
         # 更新状态
         self.redis.key_insert(self.prefix + user_id, cur_state)
 
         # TODO 如果ls_state == cur_state默认为用户当前句并没有提及到任何有用的信息
-        if ls_state == cur_state:
-            return {}
+        # if ls_state == cur_state:
+        #     return {}
         return cur_state
 
     def build_wdtype_dict(self):
@@ -227,6 +236,11 @@ class QuestionClassifier:
         final_wds = [i for i in region_wds if i not in stop_wds]
         final_dict = {i: self.wdtype_dict.get(i) for i in final_wds}
 
+        return final_dict
+
+    def check_entity(self, question):
+        entity = self.region_tree.find_entity(str(question), longest=True, drop_duplicates=True)
+        final_dict = {item: self.wdtype_dict.get(item) for item in entity.values()}
         return final_dict
 
     def check_words(self, wds, sent):

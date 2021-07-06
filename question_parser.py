@@ -87,9 +87,14 @@ class QuestionPaser:
 
         return sqls
 
-    '''针对不同的问题，分开进行处理'''
-
     def sql_transfer(self, question_type, entities):
+        """
+        针对不同的问题，分开进行处理，主要分为查找某实体的属性，或查找与实体有某关系的实体
+        1、查找实体的属性  MATCH (m:Disease) where m.name = '疾病名' return m.name, m.cause
+        2、查找与实体有某关系的实体
+        MATCH (m:Disease)-[r:has_symptom]->(n:Symptom) where m.name = '{0}' return m.name, r.name, n.name
+        """
+
         if not entities:
             return []
 
@@ -210,6 +215,8 @@ class QuestionPaser:
 
 if __name__ == '__main__':
     handler = QuestionPaser()
-    sql = handler.parser_main({'args': {'豆仁饭': ['food'], '感冒': ['disease']},
-                               'question_types': ['disease_do_food', 'food_do_disease']})
+    # sql = handler.parser_main({'args': {'豆仁饭': ['food'], '感冒': ['disease']},
+    #                            'question_types': ['disease_do_food', 'food_do_disease']})
+    sql = handler.parser_main({'args': {'非典': ['disease'], '感冒': ['disease']},
+                               'question_types': ['disease_symptom']})
     print(sql)

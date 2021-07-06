@@ -27,12 +27,13 @@ class ChatBotGraph:
             return answer
         # 先到redis中拉取历史对话信息
         res_classify = self.classifier.classify(sent, user_id)
+        print(res_classify)
         """
         sent:豆仁饭感冒可以吃吗
         res_classify: {'args': {'豆仁饭': ['food'], '感冒': ['disease']}, 
                         'question_types': ['disease_do_food', 'food_do_disease']}
         """
-        if not res_classify:
+        if not res_classify or (not res_classify['args'] and not res_classify['question_types']):
             return answer
         res_sql = self.parser.parser_main(res_classify)
         final_answers = self.searcher.search_main(res_sql)
